@@ -15,7 +15,7 @@ public class OrbitCameraController : MonoBehaviour
     float focusRange = 2.5f;
 
     [SerializeField, Range(0, 1)]
-    float autoFocusDamping = 0.5f;
+    float autoCenterDamping = 0.5f;
 
     [SerializeField]
     Vector2 orbitAngles = new Vector2(45, 0);
@@ -27,11 +27,30 @@ public class OrbitCameraController : MonoBehaviour
     float rotationSpeed = 90f;
 
     [SerializeField, Min(0)]
-    float autoAlignRotateDelay = 3f;
+    float autoAlignDelay = 3f;
+    
+    [SerializeField, Range(0, 90)]
+    float autoAlignSmoothAngle = 45f;
     float lastManualRotateTime = 0f;
-    Vector3 lastFocusPos = Vector3.zero;
+
+    [SerializeField]
+    LayerMask obstructionMask = -1;
+ 
 
     Vector3 focusPos = Vector3.zero;
+    Vector3 lastFocusPos = Vector3.zero;
+
+    Camera thisCamera;
+    Vector3 cameraNearHalfExtend {
+        get {
+            Vector3 ext;
+            ext.y = Mathf.Tan(thisCamera.fieldOfView * Mathf.Deg2Rad * 0.5f) * thisCamera.nearClipPlane;
+            ext.x = ext.y * thisCamera.aspect;
+            ext.z = 0;
+            return ext;
+        }
+    }
+
 
     private void OnValidate() {
         minMaxVerticalAngles.x = Mathf.Clamp(minMaxVerticalAngles.x, -89, minMaxVerticalAngles.y);
@@ -40,18 +59,27 @@ public class OrbitCameraController : MonoBehaviour
 
     // Start is called before the first frame update
     void Start() {
-       focusPos = targetTransform.position;
-       lastManualRotateTime = Time.unscaledTime;
-       lastFocusPos = focusPos;
+        thisCamera = gameObject.GetComponent<Camera>();
+        focusPos = targetTransform.position;
+        lastManualRotateTime = Time.unscaledTime;
+        lastFocusPos = focusPos;
     }
 
 
     private void LateUpdate() {
         UpdateFocusPosition();
         bool hasRotation = UpdateRotation() || AutoAlignRotation();
+        ConstraintRotationAngles();
         Quaternion lookRot = hasRotation ? Quaternion.Euler(orbitAngles) : gameObject.transform.localRotation;
         Vector3 lookDir =  lookRot * Vector3.forward;
-        Vector3 lookPos = focusPos - lookDir * followDistance;
+        float distance = followDistance;
+        // if (Physics.Raycast(focusPos, -lookDir, out RaycastHit hit, distance, obstructionMask)) {
+        //     distance = hit.distance;
+        // }
+        if (Physics.BoxCast(focusPos, cameraNearHalfExtend, -lookDir, out RaycastHit hit, lookRot, distance - thisCamera.nearClipPlane, obstructionMask)) {
+            distance = hit.distance + thisCamera.nearClipPlane;
+        }
+        Vector3 lookPos = focusPos - lookDir * distance;
         gameObject.transform.SetPositionAndRotation(lookPos, lookRot);
     }
 
@@ -59,8 +87,8 @@ public class OrbitCameraController : MonoBehaviour
         lastFocusPos = focusPos;
         float distance = Vector3.Distance(focusPos, targetTransform.position);
         float t = 1f;
-        if (distance > 0.05f && autoFocusDamping > 0) {
-            t = Mathf.Pow(autoFocusDamping, Time.unscaledDeltaTime);
+        if (distance > 0.05f && autoCenterDamping > 0) {
+            t = Mathf.Pow(autoCenterDamping, Time.unscaledDeltaTime);
         }
         if (distance > focusRange) {
             t =  Mathf.Min(t, focusRange / distance);
@@ -74,13 +102,6 @@ public class OrbitCameraController : MonoBehaviour
         float epsilon = 0.01f;
         if (Mathf.Abs(input.x) > epsilon || Mathf.Abs(input.y) > epsilon) {
             orbitAngles += input * rotationSpeed * Time.unscaledDeltaTime;
-            orbitAngles.x = Mathf.Clamp(orbitAngles.x, minMaxVerticalAngles.x, minMaxVerticalAngles.y);
-            
-            if (orbitAngles.y < 0)
-                orbitAngles.y += 360;
-            if (orbitAngles.y > 360)
-                orbitAngles.y -= 360;
-
             lastManualRotateTime = Time.unscaledTime;
             return true;
         }
@@ -88,22 +109,45 @@ public class OrbitCameraController : MonoBehaviour
         return false;
     }
 
-    bool AutoAlignRotation() { // automic rotate camera around y axis to follow player
-        if (Time.unscaledTime - lastManualRotateTime < autoAlignRotateDelay)
+    private bool AutoAlignRotation() { // automic rotate camera around y axis to follow player
+        if (Time.unscaledTime - lastManualRotateTime < autoAlignDelay)
             return false;
 
         Vector2 xzMovement = new Vector2(focusPos.x - lastFocusPos.x, focusPos.z - lastFocusPos.z);
-        float lenSq = xzMovement.SqrMagnitude();
-        if (lenSq < 0.00001)
+        float moveAount = xzMovement.magnitude;
+        if (moveAount <= 0.001)
             return false;
         
-        Vector2 moveDir = xzMovement / Mathf.Sqrt(lenSq);
+        Vector2 moveDir = xzMovement / moveAount;
         float angle = Mathf.Acos(moveDir.y) * Mathf.Rad2Deg;
         if (moveDir.x < 0)
             angle = 360 - angle;
 
-        orbitAngles.y = angle;    
+        float maxRotateChange = rotationSpeed * Time.unscaledDeltaTime;
+        float detalAngle = Mathf.Abs(Mathf.DeltaAngle(orbitAngles.y, angle));
+        if (detalAngle < autoAlignSmoothAngle)
+            maxRotateChange *= (detalAngle / autoAlignSmoothAngle);
+
+        orbitAngles.y = Mathf.MoveTowardsAngle(orbitAngles.y, angle, maxRotateChange);
+
+        // Vector3 xzMovement = new Vector3(focusPos.x - lastFocusPos.x, 0, focusPos.z - lastFocusPos.z);
+        // float moveAmount = xzMovement.magnitude;
+        // if (moveAmount <= 0.01)
+        //     return false;
+
+        // Vector3 moveDir = xzMovement / moveAmount;
+        // orbitAngles.y = Mathf.Acos(Vector3.Dot(Vector3.forward, moveDir)) * Mathf.Rad2Deg;    
 
         return true;
+    }
+
+
+    private void ConstraintRotationAngles() {
+        orbitAngles.x = Mathf.Clamp(orbitAngles.x, minMaxVerticalAngles.x, minMaxVerticalAngles.y);
+
+        if (orbitAngles.y < 0)
+            orbitAngles.y += 360;
+        if (orbitAngles.y > 360)
+            orbitAngles.y -= 360;
     }
 }

@@ -11,6 +11,9 @@ public class RigidBallMovementController : MonoBehaviour
     Vector3 vecl = Vector3.zero;
     Vector3 diserVecl = Vector3.zero;
 
+    [SerializeField]
+    Transform inputSpace;
+
     [SerializeField, Range(0, 100)]
     float maxSpeed = 15;
     [SerializeField, Range(0, 100)]
@@ -77,6 +80,19 @@ public class RigidBallMovementController : MonoBehaviour
     void Update() {
         Vector3 inputVec = new Vector3(Input.GetAxis("Horizontal"), 0, Input.GetAxis("Vertical"));
         Vector3.ClampMagnitude(inputVec, 1);
+        if (inputSpace) {
+            // Vector3 xAxies = inputSpace.right;
+            // Vector3 zAxies = inputSpace.forward;
+            // xAxies.y = 0;
+            // zAxies.y = 0;
+            // xAxies.Normalize();
+            // zAxies.Normalize();
+            // inputVec = inputVec.x * xAxies + inputVec.y * zAxies;
+            inputVec = inputSpace.TransformVector(inputVec);
+            float inputLen = inputVec.magnitude;
+            inputVec.y = 0;
+            inputVec = inputVec.normalized * inputLen;
+        }
         diserVecl = inputVec * maxSpeed; 
         diserJump = Input.GetButtonDown("Jump");
 
