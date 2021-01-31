@@ -5,40 +5,21 @@ using UnityEngine;
 [RequireComponent(typeof(Camera))]
 public class OrbitCameraController : MonoBehaviour
 {
-    [SerializeField]
-    Transform targetTransform;
-    
-    [SerializeField, Min(0)]
-    float followDistance = 5;
+    [SerializeField] Transform targetTransform;
+    [SerializeField, Min(0)] float followDistance = 5;
+    [SerializeField, Range(0, 5)] float focusRange = 2.5f;
+    [SerializeField, Range(0, 1)] float autoCenterDamping = 0.5f;
+    [SerializeField, Min(0)] float rotationSpeed = 90f;
+    [SerializeField] Vector2 minMaxVerticalAngles = new Vector2(-30, 89);
+    [SerializeField, Min(0)] float autoAlignDelay = 3f;
+    [SerializeField, Range(0, 90)] float autoAlignSmoothAngle = 45f;
+    [SerializeField] LayerMask obstructionMask = -1;
 
-    [SerializeField, Range(0, 5)]
-    float focusRange = 2.5f;
-
-    [SerializeField, Range(0, 1)]
-    float autoCenterDamping = 0.5f;
-
-    [SerializeField]
-    Vector2 orbitAngles = new Vector2(45, 0);
-
-    [SerializeField]
-    Vector2 minMaxVerticalAngles = new Vector2(-30, 89);
-
-    [SerializeField, Min(0)]
-    float rotationSpeed = 90f;
-
-    [SerializeField, Min(0)]
-    float autoAlignDelay = 3f;
-    
-    [SerializeField, Range(0, 90)]
-    float autoAlignSmoothAngle = 45f;
     float lastManualRotateTime = 0f;
-
-    [SerializeField]
-    LayerMask obstructionMask = -1;
- 
-
     Vector3 focusPos = Vector3.zero;
     Vector3 lastFocusPos = Vector3.zero;
+    Vector3 orbitAngles = Vector3.zero;
+    Quaternion alignToGravityRot = Quaternion.identity;
 
     Camera thisCamera;
     Vector3 cameraNearHalfExtend {
@@ -63,14 +44,15 @@ public class OrbitCameraController : MonoBehaviour
         focusPos = targetTransform.position;
         lastManualRotateTime = Time.unscaledTime;
         lastFocusPos = focusPos;
+        orbitAngles = transform.localRotation.eulerAngles;
+        orbitAngles.y = 0;
+        transform.localRotation = Quaternion.Euler(orbitAngles);
     }
 
 
     private void LateUpdate() {
         UpdateFocusPosition();
-        bool hasRotation = UpdateRotation() || AutoAlignRotation();
-        ConstraintRotationAngles();
-        Quaternion lookRot = hasRotation ? Quaternion.Euler(orbitAngles) : gameObject.transform.localRotation;
+        Quaternion lookRot = UpdateRotation();
         Vector3 lookDir =  lookRot * Vector3.forward;
         float distance = followDistance;
         // if (Physics.Raycast(focusPos, -lookDir, out RaycastHit hit, distance, obstructionMask)) {
@@ -97,8 +79,8 @@ public class OrbitCameraController : MonoBehaviour
         focusPos = Vector3.Lerp(targetTransform.position, focusPos, t);
     }
 
-    private bool UpdateRotation() {
-        Vector2 input = new Vector2(Input.GetAxis("Vertical Camera"), Input.GetAxis("Horizontal Camera"));
+    private bool ManualRotation() {
+        Vector3 input = new Vector3(Input.GetAxis("Vertical Camera"), Input.GetAxis("Horizontal Camera"), 0);
         float epsilon = 0.01f;
         if (Mathf.Abs(input.x) > epsilon || Mathf.Abs(input.y) > epsilon) {
             orbitAngles += input * rotationSpeed * Time.unscaledDeltaTime;
@@ -112,8 +94,9 @@ public class OrbitCameraController : MonoBehaviour
     private bool AutoAlignRotation() { // automic rotate camera around y axis to follow player
         if (Time.unscaledTime - lastManualRotateTime < autoAlignDelay)
             return false;
-
-        Vector2 xzMovement = new Vector2(focusPos.x - lastFocusPos.x, focusPos.z - lastFocusPos.z);
+   
+        Vector3 offset = Quaternion.Inverse(alignToGravityRot) * (focusPos - lastFocusPos);
+        Vector2 xzMovement = new Vector2(offset.x, offset.z);
         float moveAount = xzMovement.magnitude;
         if (moveAount <= 0.001)
             return false;
@@ -138,16 +121,24 @@ public class OrbitCameraController : MonoBehaviour
         // Vector3 moveDir = xzMovement / moveAmount;
         // orbitAngles.y = Mathf.Acos(Vector3.Dot(Vector3.forward, moveDir)) * Mathf.Rad2Deg;    
 
-        return true;
+        return false;
     }
 
+    private Quaternion UpdateRotation() {
+        Quaternion rot = Quaternion.Euler(orbitAngles);
+        bool hasRotation = ManualRotation() || AutoAlignRotation();
+        if (hasRotation) {
+            orbitAngles.x = Mathf.Clamp(orbitAngles.x, minMaxVerticalAngles.x, minMaxVerticalAngles.y);
+            if (orbitAngles.y < 0)
+                orbitAngles.y += 360;
+            if (orbitAngles.y > 360)
+                orbitAngles.y -= 360;
+            rot = Quaternion.Euler(orbitAngles);
+        }
 
-    private void ConstraintRotationAngles() {
-        orbitAngles.x = Mathf.Clamp(orbitAngles.x, minMaxVerticalAngles.x, minMaxVerticalAngles.y);
+        alignToGravityRot = Quaternion.FromToRotation(Vector3.up, -Physics.gravity.normalized);
+        rot = alignToGravityRot * rot;
 
-        if (orbitAngles.y < 0)
-            orbitAngles.y += 360;
-        if (orbitAngles.y > 360)
-            orbitAngles.y -= 360;
+        return rot;
     }
 }

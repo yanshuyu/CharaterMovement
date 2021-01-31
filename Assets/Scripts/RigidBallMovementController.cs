@@ -14,29 +14,23 @@ public class RigidBallMovementController : MonoBehaviour
     [SerializeField]
     Transform inputSpace;
 
-    [SerializeField, Range(0, 100)]
-    float maxSpeed = 15;
-    [SerializeField, Range(0, 100)]
-    float maxAccel = 12f;
-    [SerializeField, Range(0, 10)]
-    float maxAirAccel = 6f;
-
-    [SerializeField, Range(1, 10)]
-    float jumpHeight = 2;
-    [SerializeField, Min(0)]
-    int maxAirJump = 0;
+    // move
+    [SerializeField, Range(0, 100), Header("Move Setting")] float maxSpeed = 15;
+    [SerializeField, Range(0, 100)] float maxAccel = 12f;
+    
+    // jump
+    [SerializeField, Range(1, 10), Header("Jump Setting")] float jumpHeight = 2;
+    [SerializeField, Min(0)] int maxAirJump = 0;
+    [SerializeField, Range(0, 10)] float maxAirAccel = 6f;
     bool diserJump = false;
     int jumpPhase = 0;
 
-    [SerializeField, Range(0, 90)]
-    float maxGroundSlot = 10;
-    float maxGroundSlotDot = 15;
-    [SerializeField, Range(0, 100)]
-    float maxSnapSpeed = 20;
-    [SerializeField, Min(0)]
-    float maxProbeDistance = 0.5f;
-    [SerializeField]
-    LayerMask probeMask = -1;
+    // slot
+    [SerializeField, Range(0, 90), Header("Slot Setting")] float maxGroundSlot = 10;
+    float minGroundSlotDot = 1;
+    [SerializeField, Range(0, 100)] float maxSnapSpeed = 20;
+    [SerializeField, Min(0)] float maxProbeDistance = 0.5f;
+    [SerializeField] LayerMask probeMask = -1;
 
     int groundContactCnt = 0;
     Vector3 groundContactNormal = Vector3.zero;
@@ -45,6 +39,9 @@ public class RigidBallMovementController : MonoBehaviour
     int steepContactCnt = 0;
     Vector3 steepContactNormal = Vector3.zero;
 
+    Vector3 upAxis;
+    Vector3 rightAxis;
+    Vector3 forwardAxis;
 
     public bool IsOnGround {
        get {
@@ -65,34 +62,31 @@ public class RigidBallMovementController : MonoBehaviour
     }
 
     private void OnValidate() {
-        maxGroundSlotDot = Mathf.Cos(Mathf.Deg2Rad * maxGroundSlot);
+        minGroundSlotDot = Mathf.Cos(Mathf.Deg2Rad * maxGroundSlot);
     }
 
     // Start is called before the first frame update
     void Start() {
         rigidbody = gameObject.GetComponent<Rigidbody>();
         renderer = gameObject.GetComponent<Renderer>();
-        maxGroundSlotDot = Mathf.Cos(Mathf.Deg2Rad * maxGroundSlot);
+        minGroundSlotDot = Mathf.Cos(Mathf.Deg2Rad * maxGroundSlot);
         originalColor = renderer.material.GetColor("_Color");
+        upAxis = -Physics.gravity.normalized;
     }
 
     // Update is called once per frame
     void Update() {
+        upAxis = -Physics.gravity.normalized;
+        if (inputSpace) {
+            rightAxis = OrthogonalToDirection(upAxis, inputSpace.right);
+            forwardAxis = OrthogonalToDirection(upAxis, inputSpace.forward);
+        } else {
+            rightAxis = OrthogonalToDirection(upAxis, Vector3.right);
+            forwardAxis = OrthogonalToDirection(upAxis, Vector3.forward);
+        }
+
         Vector3 inputVec = new Vector3(Input.GetAxis("Horizontal"), 0, Input.GetAxis("Vertical"));
         Vector3.ClampMagnitude(inputVec, 1);
-        if (inputSpace) {
-            // Vector3 xAxies = inputSpace.right;
-            // Vector3 zAxies = inputSpace.forward;
-            // xAxies.y = 0;
-            // zAxies.y = 0;
-            // xAxies.Normalize();
-            // zAxies.Normalize();
-            // inputVec = inputVec.x * xAxies + inputVec.y * zAxies;
-            inputVec = inputSpace.TransformVector(inputVec);
-            float inputLen = inputVec.magnitude;
-            inputVec.y = 0;
-            inputVec = inputVec.normalized * inputLen;
-        }
         diserVecl = inputVec * maxSpeed; 
         diserJump = Input.GetButtonDown("Jump");
 
@@ -153,7 +147,7 @@ public class RigidBallMovementController : MonoBehaviour
 
         for (int i = 0; i < collision.contactCount; i++) {
             Vector3 contactNor = collision.GetContact(i).normal;
-            if (contactNor.y >= maxGroundSlotDot) {
+            if (Vector3.Dot(contactNor, upAxis) >= minGroundSlotDot) {
                 groundContactNormal += contactNor;
                 groundContactCnt++;
             } else {
@@ -173,19 +167,14 @@ public class RigidBallMovementController : MonoBehaviour
 
     void Move() {
         float maxVeclChange = ((IsOnGround || isOnSteep) ? maxAccel : maxAirAccel) * Time.deltaTime;
-        Vector3 xAxis = Vector3.right;
-        Vector3 zAxis = Vector3.forward;
-
+        Vector3 xAxis = rightAxis;
+        Vector3 zAxis = forwardAxis;
         if (IsOnGround) {
-            xAxis = (Vector3.right - Vector3.Dot(Vector3.right, groundContactNormal) * groundContactNormal).normalized;
-            zAxis = (Vector3.forward - Vector3.Dot(Vector3.forward, groundContactNormal) * groundContactNormal).normalized;
+            xAxis = OrthogonalToDirection(groundContactNormal, xAxis);
+            zAxis = OrthogonalToDirection(groundContactNormal, zAxis);
         } else if (isOnSteep) {
-            float xdotn = Vector3.Dot(Vector3.right, steepContactNormal);
-            float zdotn = Vector3.Dot(Vector3.forward, steepContactNormal);
-            if (xdotn != 1 && zdotn != 1) { // move axis us paralla with contact normal
-                xAxis = (Vector3.right -  xdotn * steepContactNormal).normalized;
-                zAxis = (Vector3.forward - zdotn * steepContactNormal).normalized;
-            }
+            xAxis = OrthogonalToDirection(steepContactNormal, rightAxis);
+            zAxis = OrthogonalToDirection(steepContactNormal, zAxis);
         }
 
         float alignXVecl = Vector3.Dot(vecl, xAxis);
@@ -212,15 +201,15 @@ public class RigidBallMovementController : MonoBehaviour
             steepContactNormal = Vector3.zero;
 
         } else if (jumpPhase > 0) {
-            jumpDir = Vector3.up;
+            jumpDir = upAxis;
         }
 
         if (jumpDir == Vector3.zero)
             return;
         
-        jumpDir = (jumpDir + Vector3.up).normalized; // add jump bias
+        jumpDir = (jumpDir + upAxis).normalized; // add jump bias
 
-        float desirJumpSpeed = Mathf.Sqrt(-2 * Physics.gravity.y * jumpHeight); // desire jump speed in y direction
+        float desirJumpSpeed = Mathf.Sqrt(2 * Physics.gravity.magnitude * jumpHeight); // desire jump speed in y direction
         float aligneSpeed = Vector3.Dot(vecl, jumpDir);
         if (aligneSpeed > 0)
             desirJumpSpeed = Mathf.Max(desirJumpSpeed - aligneSpeed, 0);
@@ -236,8 +225,8 @@ public class RigidBallMovementController : MonoBehaviour
         if (speed > maxSnapSpeed)
             return;
 
-        if (Physics.Raycast(rigidbody.position, Vector3.down, out RaycastHit hit, maxProbeDistance)) {
-            if (hit.normal.y > maxGroundSlotDot) { // if blow charater is ground 
+        if (Physics.Raycast(rigidbody.position, -upAxis, out RaycastHit hit, maxProbeDistance, probeMask)) {
+            if (Vector3.Dot(hit.normal, upAxis) > minGroundSlotDot) { // if blow charater is ground 
                 float vdotn = Vector3.Dot(vecl, hit.normal);
                 if (vdotn > 0) {
                     vecl = (vecl - hit.normal * vdotn).normalized * speed;
@@ -250,7 +239,7 @@ public class RigidBallMovementController : MonoBehaviour
 
     // 卡在裂缝
     bool ResueCrevasse() {
-        if (!IsOnGround && steepContactCnt > 1 && steepContactNormal.y >= maxGroundSlotDot) {
+        if (!IsOnGround && steepContactCnt > 1 && Vector3.Dot(steepContactNormal, upAxis) >= minGroundSlotDot) {
             groundContactCnt = 1;
             groundContactNormal = steepContactNormal;
             steepContactCnt = 0;
@@ -259,6 +248,14 @@ public class RigidBallMovementController : MonoBehaviour
         }
 
         return false;
+    }
+
+    Vector3 OrthogonalToDirection(Vector3 dir, Vector3 vec, bool normalize = true) {
+        dir = dir.normalized;
+        Vector3 orthVec = vec - Vector3.Dot(vec, dir) * dir;
+        if (normalize)
+            orthVec.Normalize();
+        return orthVec;
     }
 
 }
