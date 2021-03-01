@@ -121,7 +121,7 @@ public class OrbitCameraController : MonoBehaviour
         // Vector3 moveDir = xzMovement / moveAmount;
         // orbitAngles.y = Mathf.Acos(Vector3.Dot(Vector3.forward, moveDir)) * Mathf.Rad2Deg;    
 
-        return false;
+        return true;
     }
 
     private Quaternion UpdateRotation() {
